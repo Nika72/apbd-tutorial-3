@@ -3,18 +3,15 @@ using System.Collections.Generic;
 using System.Linq;
 using ConsoleApp1;
 
-
 public interface IHazardNotifier
 {
     void NotifyHazard(string containerNumber);
 }
 
-
 public class OverfillException : Exception
 {
     public OverfillException(string message) : base(message) { }
 }
-
 
 public class Cargo
 {
@@ -22,8 +19,7 @@ public class Cargo
     public double Mass { get; set; }
 }
 
-
-public abstract class Container : IHazardNotifier
+public class Container
 {
     public string SerialNumber { get; }
     public double MassCapacity { get; }
@@ -37,13 +33,21 @@ public abstract class Container : IHazardNotifier
         TareWeight = tareWeight;
     }
 
-    public abstract void LoadCargo(Cargo cargo);
-    public abstract void EmptyCargo();
-    public abstract void NotifyHazard(string containerNumber);
+    public virtual void LoadCargo(Cargo cargo)
+    {
+        if (cargo.Mass > MassCapacity)
+            throw new OverfillException("Cargo mass exceeds container capacity.");
+
+        CurrentCargoMass = cargo.Mass;
+    }
+
+    public virtual void EmptyCargo()
+    {
+        CurrentCargoMass = 0;
+    }
 }
 
-
-public class LiquidContainer : Container
+public class LiquidContainer : Container, IHazardNotifier
 {
     public double Pressure { get; }
 
@@ -55,24 +59,34 @@ public class LiquidContainer : Container
 
     public override void LoadCargo(Cargo cargo)
     {
-        if (cargo.Mass > MassCapacity * 0.5)
-            throw new OverfillException("Liquid container can only be filled up to 50% of its capacity.");
-
-        CurrentCargoMass = cargo.Mass;
+        if (cargo.Type == "hazardous")
+        {
+            if (cargo.Mass > MassCapacity * 0.5)
+                throw new OverfillException("Liquid container can only be filled up to 50% of its capacity.");
+        }
+        else
+        {
+            // Fill the container to 90% capacity if cargo is not hazardous
+            double maximumAllowedMass = MassCapacity * 0.9;
+            if (cargo.Mass > maximumAllowedMass)
+            {
+                Console.WriteLine($"Warning: Liquid container {SerialNumber} is being filled more than 90% of its capacity.");
+                CurrentCargoMass = maximumAllowedMass;
+            }
+            else
+            {
+                CurrentCargoMass = cargo.Mass;
+            }
+        }
     }
 
-    public override void EmptyCargo()
-    {
-        CurrentCargoMass = 0;
-    }
 
-    public override void NotifyHazard(string containerNumber)
+
+    public void NotifyHazard(string containerNumber)
     {
         Console.WriteLine($"Hazardous situation detected in liquid container {containerNumber}");
     }
 }
-
-
 
 public class GasContainer : Container, IHazardNotifier
 {
@@ -97,13 +111,11 @@ public class GasContainer : Container, IHazardNotifier
         CurrentCargoMass *= 0.95; // Leave 5% inside
     }
 
-    public override void NotifyHazard(string containerNumber)
+    public void NotifyHazard(string containerNumber)
     {
         Console.WriteLine($"Hazardous situation detected in gas container {containerNumber}");
     }
 }
-
-
 
 public class RefrigeratedContainer : Container
 {
@@ -143,17 +155,7 @@ public class RefrigeratedContainer : Container
     {
         CurrentCargoMass = 0;
     }
-
-    public override void NotifyHazard(string containerNumber)
-    {
-        Console.WriteLine($"Hazardous situation detected in refrigerated container {containerNumber}");
-    }
 }
-
-
-
-
-
 
 public class UserInterface
 {
@@ -172,6 +174,13 @@ public class UserInterface
     {
         try
         {
+            // Check if the container with the same serial number already exists on the ship
+            if (ship.Containers.Any(c => c.SerialNumber == container.SerialNumber))
+            {
+                Console.WriteLine($"Error: Container with serial number {container.SerialNumber} already exists on the ship.");
+                return;
+            }
+
             containerManagementSystem.LoadContainerToShip(container, ship);
             Console.WriteLine($"Container {container.SerialNumber} loaded onto ship {ship.Name} successfully.");
         }
@@ -183,11 +192,16 @@ public class UserInterface
         {
             Console.WriteLine($"Error: {ex.Message}. Container {container.SerialNumber} cannot be overfilled.");
         }
+        catch (OverfillException ex)
+        {
+            Console.WriteLine($"Error: {ex.Message}. Cargo cannot be loaded into the container.");
+        }
         catch (Exception ex)
         {
             Console.WriteLine($"Error: {ex.Message}");
         }
     }
+
 
     public void UnloadContainerFromShip(Container container, Ship ship)
     {
@@ -225,25 +239,25 @@ public class UserInterface
         public ShipCapacityExceededException(string message) : base(message) { }
     }
 
-// Exception for when a container is overfilled
+    // Exception for when a container is overfilled
     public class ContainerOverfillException : Exception
     {
         public ContainerOverfillException(string message) : base(message) { }
     }
 
-// Exception for data storage errors
+    // Exception for data storage errors
     public class DataStorageException : Exception
     {
         public DataStorageException(string message) : base(message) { }
     }
 
-// Exception for data retrieval errors
+    // Exception for data retrieval errors
     public class DataRetrievalException : Exception
     {
         public DataRetrievalException(string message) : base(message) { }
     }
 
-// Exception for unit testing errors
+    // Exception for unit testing errors
     public class UnitTestingException : Exception
     {
         public UnitTestingException(string message) : base(message) { }
@@ -254,6 +268,7 @@ public class UserInterface
         try
         {
             return dataPersistence.RetrieveData();
+
         }
         catch (DataRetrievalException ex)
         {
@@ -350,7 +365,7 @@ class Program
             {
                 case "1":
                     Console.WriteLine("Enter container type (liquid/gas/refrigerated):");
-                    string containerType = Console.ReadLine();
+                    string containerType = Console.ReadLine().ToLower(); // Convert to lowercase for consistency
                     Console.WriteLine("Enter container serial number:");
                     string containerSerialNumber = Console.ReadLine();
                     Console.WriteLine("Enter container mass capacity:");
@@ -359,7 +374,7 @@ class Program
                     double containerTareWeight = double.Parse(Console.ReadLine());
 
                     Container container;
-                    switch (containerType.ToLower())
+                    switch (containerType)
                     {
                         case "liquid":
                             Console.WriteLine("Enter container pressure:");
@@ -379,8 +394,16 @@ class Program
                             continue;
                     }
 
+                    // Add prompts for cargo type and mass
+                    Console.WriteLine("Enter cargo type:");
+                    string cargoType = Console.ReadLine();
+                    Console.WriteLine("Enter cargo mass:");
+                    double cargoMass = double.Parse(Console.ReadLine());
+                    Cargo cargo = new Cargo() { Type = cargoType, Mass = cargoMass };
+
                     ui.LoadContainerToShip(container, ship);
                     break;
+
 
                 case "2":
                    
